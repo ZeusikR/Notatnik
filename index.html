@@ -11,12 +11,12 @@
   <meta name="theme-color" content="#000000">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <!-- Tutaj wklejasz konfigurację PWA -->
-    <link rel="manifest" href="./manifest.json">
-    <script>
-      if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('./sw.js');
-      }
-    </script>
+  <link rel="manifest" href="./manifest.json">
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('./sw.js');
+    }
+  </script>
   <style>
     :root {
       --bg: #1A1A1A;
@@ -27,6 +27,7 @@
       --text: #ffffff;
       --text-muted: #666666;
       --danger: #e53935;
+      --success: #4caf50;
     }
 
     * {
@@ -175,7 +176,12 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 12px;
+      gap: 8px;
+    }
+
+    .item.editing {
+      border-color: var(--accent);
+      padding: 8px 10px;
     }
 
     .item-text {
@@ -183,6 +189,18 @@
       font-size: 1rem;
       word-break: break-word;
       cursor: pointer;
+    }
+
+    .edit-input {
+      flex: 1;
+      background: var(--input-bg);
+      border: 1px solid var(--accent);
+      border-radius: 6px;
+      padding: 8px 10px;
+      color: var(--text);
+      font-size: 1rem;
+      outline: none;
+      min-width: 0;
     }
 
     .item.completed {
@@ -195,13 +213,30 @@
       color: var(--text-muted);
     }
 
-    .delete-btn {
+    .item-actions {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      flex-shrink: 0;
+    }
+
+    .icon-btn {
       background: none;
       border: none;
       color: var(--text-muted);
-      font-size: 1.2rem;
+      font-size: 1.15rem;
       cursor: pointer;
       padding: 4px 8px;
+      line-height: 1;
+    }
+
+    .edit-btn:active {
+      color: var(--accent);
+    }
+
+    .save-btn {
+      color: var(--accent);
+      font-weight: bold;
     }
 
     .delete-btn:active {
@@ -325,6 +360,7 @@
 
     let lists = JSON.parse(localStorage.getItem('czarne_listy_data')) || defaultData;
     let activeListId = JSON.parse(localStorage.getItem('czarna_aktywna_lista')) || lists[0]?.id || null;
+    let editingItemId = null;
 
     function saveData() {
       localStorage.setItem('czarne_listy_data', JSON.stringify(lists));
@@ -355,6 +391,7 @@
         };
         lists.push(newList);
         activeListId = newList.id;
+        editingItemId = null;
         closeModal();
         saveData();
       }
@@ -365,6 +402,7 @@
         const currentList = lists.find(l => l.id === activeListId);
         if (currentList && confirm(`To Twoja ostatnia lista. Czy chcesz wyczyścić wpisy z listy "${currentList.name}"?`)) {
           currentList.items = [];
+          editingItemId = null;
           saveData();
         }
         return;
@@ -374,12 +412,14 @@
       if (confirm(`Czy na pewno chcesz usunąć całą listę "${currentList.name}"?`)) {
         lists = lists.filter(l => l.id !== activeListId);
         activeListId = lists[0].id;
+        editingItemId = null;
         saveData();
       }
     }
 
     function switchList(id) {
       activeListId = id;
+      editingItemId = null;
       saveData();
     }
 
@@ -393,12 +433,14 @@
         if (currentList) {
           currentList.items.unshift({ id: Date.now(), text: text, completed: false });
           input.value = '';
+          editingItemId = null;
           saveData();
         }
       }
     }
 
     function toggleItem(itemId) {
+      if (editingItemId === itemId) return;
       const currentList = lists.find(l => l.id === activeListId);
       if (currentList) {
         currentList.items = currentList.items.map(item => {
@@ -412,11 +454,47 @@
       }
     }
 
+    function startEdit(itemId, event) {
+      event.stopPropagation();
+      editingItemId = itemId;
+      render();
+      const editInput = document.getElementById(`edit-input-${itemId}`);
+      if (editInput) {
+        editInput.focus();
+        editInput.setSelectionRange(editInput.value.length, editInput.value.length);
+      }
+    }
+
+    function saveEdit(itemId, event) {
+      if (event) event.stopPropagation();
+      const editInput = document.getElementById(`edit-input-${itemId}`);
+      if (!editInput) return;
+
+      const newText = editInput.value.trim();
+      if (newText !== '') {
+        const currentList = lists.find(l => l.id === activeListId);
+        if (currentList) {
+          currentList.items = currentList.items.map(item =>
+            item.id === itemId ? { ...item, text: newText } : item
+          );
+        }
+      }
+      editingItemId = null;
+      saveData();
+    }
+
+    function cancelEdit(event) {
+      if (event) event.stopPropagation();
+      editingItemId = null;
+      render();
+    }
+
     function deleteItem(itemId, event) {
       event.stopPropagation();
       const currentList = lists.find(l => l.id === activeListId);
       if (currentList) {
         currentList.items = currentList.items.filter(item => item.id !== itemId);
+        if (editingItemId === itemId) editingItemId = null;
         saveData();
       }
     }
@@ -425,6 +503,7 @@
       const currentList = lists.find(l => l.id === activeListId);
       if (currentList) {
         currentList.items = currentList.items.filter(item => !item.completed);
+        editingItemId = null;
         saveData();
       }
     }
@@ -469,13 +548,74 @@
 
       currentList.items.forEach(item => {
         const li = document.createElement('li');
-        li.className = `item ${item.completed ? 'completed' : ''}`;
-        li.onclick = () => toggleItem(item.id);
+        const isEditing = editingItemId === item.id;
+        li.className = `item ${item.completed ? 'completed' : ''} ${isEditing ? 'editing' : ''}`;
 
-        li.innerHTML = `
-          <span class="item-text">${item.text}</span>
-          <button class="delete-btn" onclick="deleteItem(${item.id}, event)">✕</button>
-        `;
+        if (isEditing) {
+          const input = document.createElement('input');
+          input.type = 'text';
+          input.className = 'edit-input';
+          input.id = `edit-input-${item.id}`;
+          input.value = item.text;
+          input.autocomplete = 'off';
+          input.onclick = (e) => e.stopPropagation();
+          input.onkeydown = (e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              saveEdit(item.id, e);
+            } else if (e.key === 'Escape') {
+              cancelEdit(e);
+            }
+          };
+
+          const actions = document.createElement('div');
+          actions.className = 'item-actions';
+
+          const saveBtn = document.createElement('button');
+          saveBtn.className = 'icon-btn save-btn';
+          saveBtn.type = 'button';
+          saveBtn.innerText = '✓';
+          saveBtn.onclick = (e) => saveEdit(item.id, e);
+
+          const cancelBtn = document.createElement('button');
+          cancelBtn.className = 'icon-btn delete-btn';
+          cancelBtn.type = 'button';
+          cancelBtn.innerText = '✕';
+          cancelBtn.onclick = (e) => cancelEdit(e);
+
+          actions.appendChild(saveBtn);
+          actions.appendChild(cancelBtn);
+
+          li.appendChild(input);
+          li.appendChild(actions);
+        } else {
+          li.onclick = () => toggleItem(item.id);
+
+          const span = document.createElement('span');
+          span.className = 'item-text';
+          span.textContent = item.text;
+
+          const actions = document.createElement('div');
+          actions.className = 'item-actions';
+
+          const editBtn = document.createElement('button');
+          editBtn.className = 'icon-btn edit-btn';
+          editBtn.type = 'button';
+          editBtn.innerText = '✎';
+          editBtn.onclick = (e) => startEdit(item.id, e);
+
+          const delBtn = document.createElement('button');
+          delBtn.className = 'icon-btn delete-btn';
+          delBtn.type = 'button';
+          delBtn.innerText = '✕';
+          delBtn.onclick = (e) => deleteItem(item.id, e);
+
+          actions.appendChild(editBtn);
+          actions.appendChild(delBtn);
+
+          li.appendChild(span);
+          li.appendChild(actions);
+        }
 
         listElement.appendChild(li);
       });
